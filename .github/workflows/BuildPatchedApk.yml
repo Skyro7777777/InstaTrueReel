@@ -1,0 +1,105 @@
+name: Build Patched APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Release notes for this build'
+        required: false
+        default: ''
+
+env:
+  APK_FILE: Instagram-v435.0.0.37.76-patches-v3.8.0.apk
+  OUT_APK: Instagram-v435.0.0.37.76-InstaTrueReel-signed.apk
+  KS_PASS: instatruereel2026
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout repo (with LFS for the APK)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android build-tools (zipalign + apksigner)
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'build-tools;34.0.0'
+
+      - name: Download apktool
+        run: |
+          curl -sL -o apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar
+          java -jar apktool.jar --version
+
+      - name: Decode smali (resources passthrough, -r)
+        run: |
+          echo "Decoding $APK_FILE (10-25 min)..."
+          java -Xmx6g -jar apktool.jar d -r -f -o decoded "$APK_FILE" 2>&1 | tail -8
+          echo "smali files: $(find decoded -name '*.smali' | wc -l)"
+          ls -d decoded/smali* | wc -l
+
+      - name: Apply InstaTrueReel patches
+        run: |
+          python3 patches/apply_patches.py decoded
+
+      - name: Rebuild APK (apktool b, resources passthrough)
+        run: |
+          echo "Rebuilding (15-40 min)..."
+          java -Xmx6g -jar apktool.jar b decoded -o unsigned.apk 2>&1 | tail -15
+          ls -lh unsigned.apk
+
+      - name: Zipalign
+        run: |
+          $ANDROID_HOME/build-tools/34.0.0/zipalign -f -p 4 unsigned.apk aligned.apk
+          ls -lh aligned.apk
+
+      - name: Sign (apksigner v1+v2+v3)
+        run: |
+          $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
+            --ks signing/instatruereel.jks \
+            --ks-key-alias instatruereel \
+            --ks-pass pass:$KS_PASS \
+            --key-pass pass:$KS_PASS \
+            --out "$OUT_APK" \
+            aligned.apk
+          ls -lh "$OUT_APK"
+
+      - name: Verify signature
+        run: |
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs "$OUT_APK" | head -12
+
+      - name: Upload patched APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: InstaTrueReel-patched-apk
+          path: ${{ env.OUT_APK }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload patch report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch-report
+          path: |
+            patch_report.txt
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Summary
+        run: |
+          {
+            echo "## InstaTrueReel Build"
+            echo ""
+            echo "- Input: \`$APK_FILE\`"
+            echo "- Output: \`$OUT_APK\` ($(ls -lh "$OUT_APK" 2>/dev/null | awk '{print $5}'))"
+            echo "- Notes: ${{ github.event.inputs.notes }}"
+          } >> "$GITHUB_STEP_SUMMARY"
