@@ -50,7 +50,6 @@ jobs:
             --show-bad-code \
             --deobf \
             --deobf-use-sourcename \
-            --deobf-parse-kotlin-metadata \
             --decompilation-mode restructure \
             --log-level INFO \
             "$APK" 2>&1 | tee jadx.log | tail -50
