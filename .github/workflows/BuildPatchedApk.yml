@@ -46,9 +46,9 @@ jobs:
           echo "smali files: $(find decoded -name '*.smali' | wc -l)"
           ls -d decoded/smali* | wc -l
 
-      - name: Apply InstaTrueReel patches
+      - name: Apply InstaTrueReel patches (v3: native edge-to-edge)
         run: |
-          python3 patches/apply_patches.py decoded
+          python3 patches/apply_patches.py decoded 2>&1 | tee patch_report.txt
 
       - name: Rebuild APK (apktool b, resources passthrough)
         run: |
@@ -76,6 +76,27 @@ jobs:
         run: |
           $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs "$OUT_APK" | head -12
 
+      - name: Verify patches are inside the final APK
+        run: |
+          mkdir -p finalcheck && cd finalcheck
+          unzip -o "../$OUT_APK" classes13.dex classes16.dex >/dev/null
+          python3 - <<'EOF'
+          import sys
+          ok = True
+          def check(dex, needle, label):
+              global ok
+              data = open(dex, 'rb').read()
+              found = needle.encode() in data
+              print(f"  [{' ok ' if found else 'FAIL'}] {label} ({dex})")
+              ok = ok and found
+          for dex in ('classes13.dex', 'classes16.dex'):
+              check(dex, 'TTrueReelHelper', 'helper class present')
+              check(dex, 'InstaTrueReel v0.3', 'v0.3 toast marker present')
+          check('classes16.dex', 'TTrueReelReapply', 'reapply runnable present')
+          check('classes13.dex', 'Landroid/app/Activity;I)I', 'color interceptor signature referenced')
+          sys.exit(0 if ok else 1)
+          EOF
+
       - name: Upload patched APK
         uses: actions/upload-artifact@v4
         with:
@@ -97,9 +118,11 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "## InstaTrueReel Build"
+            echo "## InstaTrueReel Build (v0.3 — native edge-to-edge)"
             echo ""
             echo "- Input: \`$APK_FILE\`"
             echo "- Output: \`$OUT_APK\` ($(ls -lh "$OUT_APK" 2>/dev/null | awk '{print $5}'))"
+            echo "- Core patch: 9Wz.EEr() forced true (IG native edge-to-edge reels mode)"
+            echo "- Interceptors: 1fC.A04 (status bar) + 1fI.A04 (nav bar)"
             echo "- Notes: ${{ github.event.inputs.notes }}"
           } >> "$GITHUB_STEP_SUMMARY"

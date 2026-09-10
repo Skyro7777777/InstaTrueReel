@@ -1,31 +1,43 @@
 #!/usr/bin/env python3
 """
-InstaTrueReel — smali patcher (v2, Phase 1.1).
+InstaTrueReel — smali patcher (v3, Phase 2 — NATIVE EDGE-TO-EDGE).
 
-Applies TikTok-style edge-to-edge (true 9:16 reels) patches to the decoded
-Instagram smali tree:
+Root cause (verified against base APK smali + decoded layouts):
+  Instagram v435 already CONTAINS a native edge-to-edge Reels mode gated by
+  X/9Wz.EEr()Z  ==  !ClipsViewerConfig.A2g && (A3H || QE flag BHQ 0x8109d400023873).
+  When false, X/2Iv feeds bds_black (0x7f060052) into the window-chrome writer
+  X/1fC.A04 -> opaque status-bar scrim = THE BLACK STRIP. The media container
+  (layout_clips_viewer_fragment: ViewPager2 0x7F0B3F45) is already match_parent
+  x match_parent and the window already runs 0x700 flags — only the opaque bar
+  color hides the full-bleed video.
 
-  1. Installs X/TTrueReelHelper (window edge-to-edge apply/restore/reapply
-     helper + activity-scoped interceptors) and X/TTrueReelReapply (Runnable).
-  2. ClipsViewerFragment (X/9Wz):
+Patches applied to the decoded smali tree:
+
+  1. X/9Wz.EEr()Z  -> FORCED TRUE (native edge-to-edge reels mode: transparent
+     status bar via bds_transparent, action-bar/overlay self-padding through
+     2Iv.A0A -> 6BM insets listener -> 0jS.A15(statusBarHeight), icon appearance
+     via 0Xm, EEr-aware overlay layout in ACN/ACO binders). Both entry points
+     are covered: the Reels tab delegates AFt.EEr() -> child 9Wz (X/3Cz).
+  2. Installs X/TTrueReelHelper (window apply/restore/reapply helper, activity
+     scoped interceptors, per-entry toast + logcat) and X/TTrueReelReapply.
+  3. ClipsViewerFragment (X/9Wz):
        onResume        -> helper.apply()
        onPause         -> helper.restore()
        onDestroyView   -> helper.restore()
        onHiddenChanged -> added override -> helper bridge
-  3. ClipsTabFragment (X/AFt):
+  4. ClipsTabFragment (X/AFt):
        onResume        -> helper.apply()
        onPause         -> added override -> helper.restore()
        onDestroyView   -> helper.restore()
        onHiddenChanged -> added override -> helper bridge
-  4. X/1fC (Instagram window-chrome controller) interceptors, active ONLY
-     while Reels is showing (activity-scoped):
-       A04(Activity, color)  -> color forced to fully transparent (0x00000000)
-                                while Reels active on the same Activity.
-                                Defeats every status-bar repaint, including the
-                                Choreographer-deferred WindowChromeColorDeferer.
-       A06(View, Window, Z)  -> forced to the "exit fullscreen" branch so the
-                                status bar stays VISIBLE (TikTok style) while
-                                Reels active on the same Window.
+  5. X/1fC.A04(Activity, color) interceptor: color forced fully transparent while
+     Reels is active on the same Activity (defeats EVERY status-bar repaint,
+     including the Choreographer-deferred WindowChromeColorDeferer branch).
+  6. X/1fI.A04(Activity, color) interceptor: navigation-bar color forced fully
+     transparent while Reels is active (NEW in v0.3 — nav strip stays black in
+     v0.2).
+  7. REMOVED vs v0.2: the X/1fC.A06 interceptor (A06 is dead code in v435 —
+     zero callers app-wide, verified by full-tree scan).
 
 Idempotent: safe to re-run. Fails loudly (exit 1) if any anchor is not found.
 """
@@ -45,21 +57,42 @@ REAPPLY_DST = os.path.join(DECODED, "smali_classes16", "X", "TTrueReelReapply.sm
 CLIPS_VIEWER = os.path.join(DECODED, "smali_classes16", "X", "9Wz.smali")
 CLIPS_TAB = os.path.join(DECODED, "smali_classes16", "X", "AFt.smali")
 WINDOW_CHROME = os.path.join(DECODED, "smali_classes13", "X", "1fC.smali")
+NAV_CHROME = os.path.join(DECODED, "smali_classes13", "X", "1fI.smali")
 
 APPLY = "invoke-static/range {p0 .. p0}, LX/TTrueReelHelper;->A00(Landroidx/fragment/app/Fragment;)V"
 RESTORE = "invoke-static/range {p0 .. p0}, LX/TTrueReelHelper;->A01(Landroidx/fragment/app/Fragment;)V"
 HIDDEN = "invoke-static {p0, p1}, LX/TTrueReelHelper;->A02(Landroidx/fragment/app/Fragment;Z)V"
 
-# Interceptor injections for X/1fC (params are low-index registers here:
-# 1fC.A04 .locals 4 -> p0=v4, p1=v5; 1fC.A06 .locals 2 -> p1=v3, p2=v4; all < 16).
-INTERCEPT_COLOR = (
+# Interceptor injections for X/1fC.A04 and X/1fI.A04 (both .locals 4 with two
+# params -> p0=v4, p1=v5; all < 16 so non-range invoke-static is valid).
+INTERCEPT_STATUS_COLOR = (
     "invoke-static {p0, p1}, LX/TTrueReelHelper;->A03(Landroid/app/Activity;I)I\n"
     "    move-result p1"
 )
-INTERCEPT_FULLSCREEN = (
-    "invoke-static {p1, p2}, LX/TTrueReelHelper;->A04(Landroid/view/Window;Z)Z\n"
-    "    move-result p2"
+INTERCEPT_NAV_COLOR = (
+    "invoke-static {p0, p1}, LX/TTrueReelHelper;->A07(Landroid/app/Activity;I)I\n"
+    "    move-result p1"
 )
+
+# Forced-true replacement body for 9Wz.EEr()Z (native edge-to-edge master switch).
+EER_METHOD_OLD = re.compile(
+    r"\.method public final EEr\(\)Z\n"
+    r"(?:[^\n]*\n)*?"
+    r"\.end method\n",
+    re.MULTILINE,
+)
+EER_METHOD_NEW = (
+    ".method public final EEr()Z\n"
+    "    .locals 1\n"
+    "\n"
+    "    # instatruereel: EEr forced true -> native edge-to-edge reels mode ON\n"
+    "    # (transparent status bar + inset-padded overlays; overrides A2g/A3H/QE)\n"
+    "    const/4 v0, 0x1\n"
+    "\n"
+    "    return v0\n"
+    ".end method\n"
+)
+EER_MARKER = "instatruereel: EEr forced true"
 
 ON_HIDDEN_OVERRIDE_2YN = (
     "\n.method public onHiddenChanged(Z)V\n"
@@ -131,9 +164,22 @@ def append_method(content, method_text, marker, label):
     return content + method_text
 
 
+def replace_method(content, regex, replacement, marker, label, expect=1):
+    """Replace whole method bodies matched by regex. Idempotent via marker."""
+    if marker in content:
+        report.append(f"  [skip] {label}: already patched")
+        return content
+    new, n = regex.subn(replacement, content, count=expect)
+    if n != expect:
+        errors.append(f"{label}: expected {expect} match(es), found {n}")
+        return content
+    report.append(f"  [ ok ] {label}: replaced ({n})")
+    return new
+
+
 def main():
     # ---------- sanity: targets exist ----------
-    for path in (CLIPS_VIEWER, CLIPS_TAB, WINDOW_CHROME):
+    for path in (CLIPS_VIEWER, CLIPS_TAB, WINDOW_CHROME, NAV_CHROME):
         if not os.path.isfile(path):
             errors.append(f"missing target file: {path}")
 
@@ -154,22 +200,30 @@ def main():
         shutil.copyfile(REAPPLY_SRC, REAPPLY_DST)
         report.append("  [ ok ] helper TTrueReelReapply installed -> smali_classes16/X/TTrueReelReapply.smali")
 
-    # ---------- 2. patch ClipsViewerFragment (X/9Wz) ----------
-    report.append("ClipsViewerFragment (X/9Wz):")
+    # ---------- 2. THE CORE PATCH: force 9Wz.EEr() = true ----------
+    report.append("ClipsViewerFragment native edge-to-edge switch (X/9Wz.EEr):")
     src = read(CLIPS_VIEWER)
 
     if ".super LX/2yN;" not in src:
         errors.append("9Wz: unexpected superclass (expected LX/2yN;)")
     if '__redex_internal_original_name:Ljava/lang/String; = "ClipsViewerFragment"' not in src:
         errors.append("9Wz: expected ClipsViewerFragment redex name not found (version drift?)")
+    if ".method public final EEr()Z" not in src:
+        errors.append("9Wz: EEr()Z method not found (version drift?)")
 
+    src = replace_method(src, EER_METHOD_OLD, EER_METHOD_NEW, EER_MARKER, "9Wz.EEr -> forced true")
+    write(CLIPS_VIEWER, src)
+
+    # ---------- 3. fragment lifecycle hooks ----------
+    report.append("ClipsViewerFragment lifecycle (X/9Wz):")
+    src = read(CLIPS_VIEWER)
     src, _ = inject_after_locals(src, "onResume()V", APPLY, "9Wz.onResume -> apply")
     src, _ = inject_after_locals(src, "onPause()V", RESTORE, "9Wz.onPause -> restore")
     src, _ = inject_after_locals(src, "onDestroyView()V", RESTORE, "9Wz.onDestroyView -> restore")
     src = append_method(src, ON_HIDDEN_OVERRIDE_2YN, "onHiddenChanged(Z)V", "9Wz.onHiddenChanged override")
     write(CLIPS_VIEWER, src)
 
-    # ---------- 3. patch ClipsTabFragment (X/AFt) ----------
+    # ---------- 4. ClipsTabFragment (X/AFt) ----------
     report.append("ClipsTabFragment (X/AFt):")
     src = read(CLIPS_TAB)
 
@@ -184,8 +238,8 @@ def main():
     src = append_method(src, ON_PAUSE_OVERRIDE_ANDROIDX, "onPause()V", "AFt.onPause override")
     write(CLIPS_TAB, src)
 
-    # ---------- 4. patch window-chrome controller (X/1fC) ----------
-    report.append("WindowChromeController (X/1fC):")
+    # ---------- 5. status-bar color interceptor (X/1fC.A04) ----------
+    report.append("WindowChromeController status bar (X/1fC.A04):")
     src = read(WINDOW_CHROME)
 
     if ".super Ljava/lang/Object;" not in src:
@@ -194,20 +248,31 @@ def main():
     src, _ = inject_after_locals(
         src,
         "A04(Landroid/app/Activity;I)V",
-        INTERCEPT_COLOR,
+        INTERCEPT_STATUS_COLOR,
         "1fC.A04 -> transparent-while-reels",
     )
+    write(WINDOW_CHROME, src)
+
+    # ---------- 6. navigation-bar color interceptor (X/1fI.A04) ----------
+    report.append("WindowChromeController navigation bar (X/1fI.A04):")
+    src = read(NAV_CHROME)
+
+    if ".super Ljava/lang/Object;" not in src:
+        errors.append("1fI: unexpected superclass (expected Ljava/lang/Object;)")
+
     src, _ = inject_after_locals(
         src,
-        "A06(Landroid/view/View;Landroid/view/Window;Z)V",
-        INTERCEPT_FULLSCREEN,
-        "1fC.A06 -> no-fullscreen-while-reels",
+        "A04(Landroid/app/Activity;I)V",
+        INTERCEPT_NAV_COLOR,
+        "1fI.A04 -> transparent-while-reels",
     )
-    write(WINDOW_CHROME, src)
+    write(NAV_CHROME, src)
 
     # ---------- verify ----------
     report.append("Verification:")
     checks = [
+        (CLIPS_VIEWER, EER_MARKER, "9Wz.EEr forced-true present"),
+        (CLIPS_VIEWER, "const/4 v0, 0x1", "9Wz.EEr returns true"),
         (CLIPS_VIEWER, APPLY, "9Wz apply present"),
         (CLIPS_VIEWER, RESTORE, "9Wz restore present"),
         (CLIPS_VIEWER, HIDDEN, "9Wz hidden bridge present"),
@@ -215,14 +280,15 @@ def main():
         (CLIPS_TAB, RESTORE, "AFt restore present"),
         (CLIPS_TAB, HIDDEN, "AFt hidden bridge present"),
         (WINDOW_CHROME, "LX/TTrueReelHelper;->A03(Landroid/app/Activity;I)I", "1fC color interceptor present"),
-        (WINDOW_CHROME, "LX/TTrueReelHelper;->A04(Landroid/view/Window;Z)Z", "1fC fullscreen interceptor present"),
+        (NAV_CHROME, "LX/TTrueReelHelper;->A07(Landroid/app/Activity;I)I", "1fI nav interceptor present"),
         (HELPER_DST, ".method public static A00(", "helper apply method present"),
         (HELPER_DST, ".method public static A01(", "helper restore method present"),
         (HELPER_DST, ".method public static A02(", "helper hidden bridge present"),
         (HELPER_DST, ".method public static A03(", "helper color interceptor present"),
-        (HELPER_DST, ".method public static A04(", "helper fullscreen interceptor present"),
+        (HELPER_DST, ".method public static A07(", "helper nav interceptor present"),
         (HELPER_DST, ".method public static A05()V", "helper scheduler present"),
         (HELPER_DST, ".method public static A06(", "helper reapply core present"),
+        (HELPER_DST, 'const-string v1, "InstaTrueReel v0.3: true 9:16 Reels ON"', "toast marker v0.3 present"),
         (REAPPLY_DST, ".implements Ljava/lang/Runnable;", "reapply runnable present"),
     ]
     for path, needle, label in checks:
@@ -236,8 +302,8 @@ def main():
 
 
 def finish():
-    print("InstaTrueReel patch report")
-    print("==========================")
+    print("InstaTrueReel patch report (v3)")
+    print("===============================")
     for line in report:
         print(line)
     if errors:

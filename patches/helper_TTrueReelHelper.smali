@@ -10,7 +10,6 @@
 .field public static A03:I                          # saved decor systemUiVisibility
 .field public static A04:I                          # saved layoutInDisplayCutoutMode (API>=28)
 .field public static A05:Z                          # ACTIVE flag (reels showing)
-.field public static A06:Z                          # toast already shown this process
 .field public static A07:Landroid/os/Handler;       # re-apply scheduler
 .field public static A08:Ljava/lang/Runnable;       # re-apply runnable
 .field public static A09:Landroid/app/Activity;     # saved activity (scope for interceptors)
@@ -20,8 +19,10 @@
 
 # A00(Landroidx/fragment/app/Fragment;)V == APPLY TikTok-style edge-to-edge to the activity window.
 # Saves prior state once, applies transparent-system-bar window chrome, marks ACTIVE,
-# shows a one-time confirmation toast and schedules delayed re-applies (defeats any
-# late status-bar writes by Instagram, incl. Choreographer-deferred WindowChromeColorDeferer).
+# shows a confirmation toast on every fresh reels entry (proves patched build is running),
+# logs to logcat (tag "InstaTrueReel") and schedules delayed re-applies.
+# v0.3: native edge-to-edge is driven by the forced 9Wz.EEr()=true patch; this helper now
+# provides scoping (ACTIVE), transparency enforcement and verification.
 .method public static A00(Landroidx/fragment/app/Fragment;)V
     .locals 6
 
@@ -69,24 +70,25 @@
     # ---- apply edge-to-edge core ----
     invoke-static {v0}, LX/TTrueReelHelper;->A06(Landroid/view/Window;)V
 
-    :cond_active
-    # ---- mark ACTIVE (enables 1fC interceptors) ----
-    const/4 v0, 0x1
-    sput-boolean v0, LX/TTrueReelHelper;->A05:Z
-
-    # ---- one-time confirmation toast (proves patched build is running) ----
-    sget-boolean v0, LX/TTrueReelHelper;->A06:Z
-    if-nez v0, :cond_no_toast
-    sput-boolean v0, LX/TTrueReelHelper;->A06:Z
+    # ---- confirmation toast on every fresh reels entry ----
     invoke-virtual {p0}, Landroidx/fragment/app/Fragment;->getActivity()Landroidx/fragment/app/FragmentActivity;
     move-result-object v0
     if-eqz v0, :cond_no_toast
-    const-string v1, "InstaTrueReel v0.2: true 9:16 Reels ON"
+    const-string v1, "InstaTrueReel v0.3: true 9:16 Reels ON"
     const/4 v2, 0x0
     invoke-static {v0, v1, v2}, Landroid/widget/Toast;->makeText(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;
     move-result-object v0
     invoke-virtual {v0}, Landroid/widget/Toast;->show()V
     :cond_no_toast
+
+    const-string v1, "InstaTrueReel"
+    const-string v2, "v0.3 apply: edge-to-edge engaged (fresh entry)"
+    invoke-static {v1, v2}, Landroid/util/Log;->e(Ljava/lang/String;Ljava/lang/String;)I
+
+    :cond_active
+    # ---- mark ACTIVE (enables 1fC/1fI interceptors) ----
+    const/4 v0, 0x1
+    sput-boolean v0, LX/TTrueReelHelper;->A05:Z
 
     # ---- schedule delayed re-applies ----
     invoke-static {}, LX/TTrueReelHelper;->A05()V
@@ -99,6 +101,9 @@
 
     :catch_0
     move-exception v0
+    const-string v1, "InstaTrueReel"
+    const-string v2, "v0.3 apply: exception (recovered)"
+    invoke-static {v1, v2, v0}, Landroid/util/Log;->e(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I
     const/4 v1, 0x0
     sput-object v1, LX/TTrueReelHelper;->A00:Landroid/view/Window;
     return-void
@@ -166,6 +171,10 @@
 
     invoke-virtual {v1}, Landroid/view/View;->requestApplyInsets()V
 
+    const-string v2, "InstaTrueReel"
+    const-string v3, "v0.3 restore: original window chrome restored"
+    invoke-static {v2, v3}, Landroid/util/Log;->e(Ljava/lang/String;Ljava/lang/String;)I
+
     :cond_reset
     const/4 v2, 0x0
     sput-object v2, LX/TTrueReelHelper;->A00:Landroid/view/Window;
@@ -202,6 +211,7 @@
 
 # A03(Landroid/app/Activity;I)I == status-bar-color interceptor for X/1fC.A04.
 # While reels ACTIVE on the SAME activity, force fully transparent (0x00000000).
+# Choke point for ALL status-bar color writes incl. Choreographer-deferred branch.
 .method public static A03(Landroid/app/Activity;I)I
     .locals 1
 
@@ -220,20 +230,20 @@
 .end method
 
 
-# A04(Landroid/view/Window;Z)Z == fullscreen-mode interceptor for X/1fC.A06.
-# While reels ACTIVE on the SAME window, never let Instagram hide the status bar
-# (force the "exit fullscreen" branch so the bar stays visible + transparent).
-.method public static A04(Landroid/view/Window;Z)Z
+# A07(Landroid/app/Activity;I)I == navigation-bar-color interceptor for X/1fI.A04.
+# While reels ACTIVE on the SAME activity, force fully transparent (0x00000000).
+# NEW in v0.3: covers the nav-bar strip (was opaque black in v0.2).
+.method public static A07(Landroid/app/Activity;I)I
     .locals 1
 
     sget-boolean v0, LX/TTrueReelHelper;->A05:Z
     if-eqz v0, :cond_pass
 
-    sget-object v0, LX/TTrueReelHelper;->A00:Landroid/view/Window;
+    sget-object v0, LX/TTrueReelHelper;->A09:Landroid/app/Activity;
     if-eqz v0, :cond_pass
     if-ne v0, p0, :cond_pass
 
-    const/4 v0, 0x1
+    const/4 v0, 0x0
     return v0
 
     :cond_pass
