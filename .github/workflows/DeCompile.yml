@@ -34,24 +34,37 @@ jobs:
           unzip -q jadx.zip -d jadx
           chmod +x jadx/bin/jadx
 
-      - name: Decompile with jadx (best quality)
+      - name: Decompile with jadx (memory-safe)
         env:
-          JAVA_OPTS: "-Xmx12g -XX:+UseG1GC"
+          JAVA_OPTS: "-Xmx6g -XX:+UseG1GC"
         run: |
           mkdir -p jadx-out
           APK="Instagram-v435.0.0.37.76-patches-v3.8.0.apk"
+          THREADS=$(nproc)
+          echo "Using $THREADS threads (matching CPU cores)"
+
           ./jadx/bin/jadx \
             -d jadx-out \
             --no-res \
-            --threads-count 6 \
+            --threads-count "$THREADS" \
             --show-bad-code \
             --deobf \
             --deobf-use-sourcename \
+            --deobf-parse-kotlin-metadata \
             --decompilation-mode restructure \
             --log-level INFO \
             "$APK" 2>&1 | tee jadx.log | tail -50
+
           echo "=== java file count ==="
           find jadx-out -name "*.java" | wc -l
+
+      - name: Show error summary (expected, not fatal)
+        if: always()
+        run: |
+          echo "=== JADX error count ==="
+          grep -c "ERROR -" jadx.log || true
+          echo "=== Unique error methods (first 20) ==="
+          grep "ERROR -   Method:" jadx.log | head -20 || true
 
       - name: Zip decompiled source
         run: |
