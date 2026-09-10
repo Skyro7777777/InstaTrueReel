@@ -1,0 +1,91 @@
+name: Analyze Smali
+
+on:
+  workflow_dispatch:
+    inputs:
+      extra_patterns:
+        description: 'Extra grep patterns (comma-separated, optional)'
+        required: false
+        default: ''
+
+env:
+  APK_FILE: Instagram-v435.0.0.37.76-patches-v3.8.0.apk
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout repo (with LFS for the APK)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: APK inventory
+        run: |
+          echo "=== APK info ==="
+          ls -lh "$APK_FILE"
+          echo
+          echo "=== dex entries ==="
+          unzip -l "$APK_FILE" | grep -E "classes[0-9]*\.dex" | sort -V
+          echo
+          echo "=== non-dex/non-res entries (patcher traces, assets, libs) ==="
+          unzip -l "$APK_FILE" | grep -vE "classes[0-9]*\.dex|res/|r/|assets/|lib/" | head -80
+
+      - name: Download apktool
+        run: |
+          curl -sL -o apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar
+          java -jar apktool.jar --version
+
+      - name: Decode smali (resources passthrough, -r)
+        run: |
+          echo "Decoding (this can take 10-25 min for Instagram)..."
+          java -Xmx6g -jar apktool.jar d -r -f -o decoded "$APK_FILE" 2>&1 | tail -25
+          echo "=== decoded root ==="
+          ls decoded | head -40
+          echo "=== smali dirs: $(ls -d decoded/smali* 2>/dev/null | wc -l) ==="
+          echo "=== total smali files: $(find decoded -name '*.smali' | wc -l) ==="
+
+      - name: Run analysis grep battery
+        run: |
+          chmod +x scripts/analyze.sh
+          ./scripts/analyze.sh decoded "${{ github.event.inputs.extra_patterns }}"
+
+      - name: Package full smali tree
+        run: |
+          echo "Zipping full smali tree (several minutes)..."
+          zip -r -q smali-full.zip decoded/smali* decoded/apktool.yml
+          ls -lh smali-full.zip
+
+      - name: Upload smali-full
+        uses: actions/upload-artifact@v4
+        with:
+          name: smali-full
+          path: smali-full.zip
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload grep reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: grep-reports
+          path: reports/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Summary
+        run: |
+          {
+            echo "## Smali Analysis Summary"
+            echo ""
+            echo "- smali files: $(find decoded -name '*.smali' | wc -l)"
+            echo "- smali dirs: $(ls -d decoded/smali* | wc -l)"
+            echo "- smali-full.zip: $(ls -lh smali-full.zip | awk '{print $5}')"
+            echo "- reports: $(ls reports | wc -l) files"
+          } >> "$GITHUB_STEP_SUMMARY"
