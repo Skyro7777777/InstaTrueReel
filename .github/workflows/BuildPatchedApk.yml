@@ -46,7 +46,7 @@ jobs:
           echo "smali files: $(find decoded -name '*.smali' | wc -l)"
           ls -d decoded/smali* | wc -l
 
-      - name: Apply InstaTrueReel patches (v3: native edge-to-edge)
+      - name: Apply InstaTrueReel patches (v3, native edge-to-edge)
         run: |
           python3 patches/apply_patches.py decoded 2>&1 | tee patch_report.txt
 
