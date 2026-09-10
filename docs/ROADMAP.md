@@ -193,3 +193,125 @@ before the parent-climb and both write branches.
 - Top overlay ("Reels" header) offset polish if status-bar-height padding looks off.
 - Non-9:16 reel letterboxing (fit vs fill) investigation if user reports pillarboxing.
 - Optional Piko-settings-style toggle UI (out of scope unless requested).
+
+---
+
+# Phase 3 — v0.4.0 (TIKTOK-STYLE OVERLAYS)
+
+## Field test of v0.3.0 (user device, Android 10, 9:16)
+
+User report: reel video NOW stretches to the uppermost part of the screen and draws
+behind the status bar — the EEr()=true patch is confirmed ACTIVE on-device. Remaining
+problems: (a) the overlay bars did not become transparent ("any of the UI didn't became
+transparent"), (b) the bottom-most edge is possibly not full-bleed. (Toast: user did not
+focus on it; adb logcat file was captured but never reached the sandbox upload folder —
+runtime confirmation of helper execution still pending.)
+
+## Deep exploration (this phase) — subagent-driven, ground-truth smali
+
+Three exploration subagents (E-1: top overlay; E-2: bottom overlay — hit turn limit,
+re-done by orchestrator directly; E-3: complete EEr consumer map) ran against the
+jadx Java artifact (44.8 MB, 90k files) and the FULL apktool smali decode (183 MB
+artifact from the AnalyzeSmali run — the jadx artifact turned out to be missing 95%
+of the ClipsViewerSource cluster, smali is the ground truth). Orchestrator then
+re-verified every claim against the raw opcodes.
+
+Key findings:
+
+1. **EEr()==true top overlay is a 60%-alpha black gradient BY DESIGN.**
+   `X/2Iv.A03()` (classes17) — the scrim provider — calls
+   `34d.A01(ctx, TOP_BOTTOM, null, 0.6)` in the EEr==true branch (unique const-wide
+   `0x3fe3333333333333L`). This scrim is THE action-bar background: it flows into
+   `360.A09` -> `35U` -> `0jS.A1K` (Reels tab), into the legacy
+   `ClipsViewerActionBar` (feed path, via `2LO.A00 = A03()`), and into the GeW
+   re-apply. 60% black over video reads as near-opaque. TikTok uses ~20%.
+2. **The EEr color choice (bds_black vs bds_transparent) is the STATUS BAR color**
+   (`0jS.A1K -> 1fC.A03 -> 1fC.A04`), NOT the bar background. This corrects the
+   v0.3 assumption in this document.
+3. **Bottom comment bar:** `ClipsViewerNavigationBar.A00(bar, A8e-state)` — if ANY
+   of the 5 A8e floats > 0 -> background = drawable `clips_viewer_action_bar_
+   gradient_background` (0x7f08042b, strong black gradient strip). All-zero ->
+   `setBackground(null)` (transparent). The gradient path is what the user sees.
+4. **2Iv.APx has TWO theme builders** (tab path via source.A0C()==true; feed path
+   otherwise). The feed-path `A1g==true` branch sets the bar bg to
+   **bds_transparent** (ColorDrawable) — ALREADY transparent; E-3 initially misread
+   the opcode order (0bF.A04(ctx)->v5 actually lands in `360.A03:I`, while
+   `360.A01(I)` receives bds_transparent). => A1g needs NO patch.
+5. **9Wz@6135 v99 QE gate -> 2IW ctor bool #56 -> field 2IW.A0I** — consumer found:
+   a TextView text-size tweak in 2Iv (~line 14908). Visually irrelevant => NOT patched.
+6. **9Wz@61719-61725 ModalActivity QE gate -> `0Ug.A02(root, lOn)`**: lOn = one-shot
+   root BOTTOM pad by the nav-bar inset (type 0x207). Forcing it TRUE would PAD THE
+   ROOT UP and BREAK bottom full-bleed => deliberately left server-false.
+7. **9Wz.onViewCreated @61687-61695**: `A2C==true` pads root bottom by
+   `tab_bar_height_panorama` (0x7f070254). A2C is server config; left alone for now
+   (revisit only if user still reports a bottom gap).
+8. EEr also offsets per-item litho content (`I45.A06` @876 pads by statusBarHeight)
+   — already active via EEr=true.
+9. `0jS.A0D()V` (a METHOD) clears click listeners — unrelated to insets; the `A0D`
+   FIELD (set by A15) is the status-bar-padded flag. (Corrects v0.3 notes.)
+10. `9Wz.A03:I` (top_of_feed_container top pad) has no writer in the base — stays 0.
+
+
+## THE LOG (user's adb logcat, committed as logOfInstaTrueReel.txt) — root cause of v0.3's missing pieces
+
+The user captured a full logcat (UTF-16 encoded, 5149 lines) and uploaded it to the repo root.
+Decoded and analyzed: **the helper DID run — and crashed twice** (once per Reels entry,
+23:14:44 tab path and 23:15:08):
+
+```
+E InstaTrueReel: v0.3 apply: exception (recovered)
+E InstaTrueReel: java.lang.NoSuchMethodError: No virtual method getAttributes()
+  Landroid/view/Window$LayoutParams; in class Landroid/view/Window;
+E InstaTrueReel:     at X.TTrueReelHelper.A00(TTrueReelHelper:46)
+E InstaTrueReel:     at X.9Wz.onResume(:0)
+```
+
+**Helper authoring bug:** the smali referenced `Landroid/view/Window$LayoutParams;`
+—a class that does not exist in the Android framework. The real type is
+`Landroid/view/WindowManager$LayoutParams;` (what `Window.getAttributes()` actually
+returns). The bad descriptor assembled fine (smali does not resolve framework types)
+and only failed lazily at first invoke on-device. Consequences:
+
+- apply() died BEFORE the toast (explains "no toast") and BEFORE any window flags were
+  set (explains the still-black bottom nav strip — "maybe not stretched up-to downmost").
+- ACTIVE was never set -> the 1fC.A04/1fI.A04 interceptors never engaged.
+- The visible top improvement came ENTIRELY from the EEr()=true patch (native pipeline
+  feeds bds_transparent to the status bar) — consistent with the user's screenshots.
+- The try/catch swallowed the error each time; zero successful applies, zero restores.
+
+**Fix (v0.4): all 8 `Window$LayoutParams` references in helper_TTrueReelHelper.smali
+corrected to `WindowManager$LayoutParams`.** With the helper alive, v0.4 gains: the
+per-entry toast, 0x700 layout flags + transparent nav bar + contrast scrims off +
+cutout SHORT_EDGES on the Reels window, ACTIVE-gated color interceptors, and the
+100/400/1000/2500 ms re-apply engine — on top of the EEr native mode and the two new
+TikTok-style overlay patches.
+
+## v0.4.0 patch set (SHIPPED — updated after log analysis)
+
+1. ALL v0.3 patches kept (EEr forced true; 1fC.A04 + 1fI.A04 color interceptors;
+   9Wz/AFt lifecycle hooks; TTrueReelHelper + TTrueReelReapply + toast/logcat).
+   **FIX: helper Window$LayoutParams -> WindowManager$LayoutParams (8 sites) — the
+   crash found in the user's logcat.**
+2. **NEW: `2Iv.A03()` scrim alpha 0.6 -> 0.2** (const-wide
+   `0x3fe3333333333333L` -> `0x3fc999999999999aL`, marked
+   `# instatruereel: 0.2 TikTok-style scrim`). One edit covers every top bar
+   (tab action bar, feed legacy bar, GeW re-apply). TikTok-like legibility gradient.
+3. **NEW: `ClipsViewerNavigationBar.A00` `:cond_e` -> null background** (replaces
+   the `getDrawable(0x7f08042b)` block with `const/4 v0, 0x0`). The bottom comment
+   bar is now always fully transparent — TikTok-style floating row over the video.
+4. Helper version strings bumped v0.3 -> v0.4 (toast: "InstaTrueReel v0.4:
+   TikTok-style Reels ON").
+5. apply_patches.py v4: two new `replace_unique` patches with uniqueness
+   pre-checks, method-signature sanity checks, marker/idempotency, a NEGATIVE
+   verification (0x7f08042b must be gone), full report.
+   Locally validated against the exact base decode (all 22 checks [ ok ],
+   idempotent re-run clean).
+
+## Next (Phase 4 candidates — after v0.4 field test)
+
+- Get the user's adb logcat (upload failed to reach the sandbox so far) to confirm
+  helper execution, nav-bar transparency writes, and per-path behavior.
+- If bottom-most still not full-bleed: investigate A2C / tab_bar_height_panorama
+  padding and the nav-bar color write path on the Reels tab (MainActivity).
+- If the top bar sits too close to the status bar icons: 0jS.A15 padding polish.
+- If legibility suffers at 0.2 alpha: consider 0.25-0.3.

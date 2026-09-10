@@ -46,7 +46,7 @@ jobs:
           echo "smali files: $(find decoded -name '*.smali' | wc -l)"
           ls -d decoded/smali* | wc -l
 
-      - name: Apply InstaTrueReel patches (v3, native edge-to-edge)
+      - name: Apply InstaTrueReel patches (v4, TikTok-style overlays)
         run: |
           python3 patches/apply_patches.py decoded 2>&1 | tee patch_report.txt
 
@@ -93,10 +93,10 @@ jobs:
           # interceptor call-sites were compiled into the shipped dex.
           check('classes13.dex', 'TTrueReelHelper', 'interceptor call-sites (1fC/1fI) present')
           # classes16 hosts the helper + reapply classes + fragments: the toast string
-          # proves the v0.3 helper body was compiled in.
+          # proves the v0.4 helper body was compiled in.
           check('classes16.dex', 'TTrueReelHelper', 'helper class defined')
           check('classes16.dex', 'TTrueReelReapply', 'reapply runnable present')
-          check('classes16.dex', 'InstaTrueReel v0.3', 'v0.3 toast marker present')
+          check('classes16.dex', 'InstaTrueReel v0.4', 'v0.4 toast marker present')
           sys.exit(0 if ok else 1)
           EOF
 
@@ -121,11 +121,13 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "## InstaTrueReel Build (v0.3 — native edge-to-edge)"
+            echo "## InstaTrueReel Build (v0.4 — TikTok-style overlays)"
             echo ""
             echo "- Input: \`$APK_FILE\`"
             echo "- Output: \`$OUT_APK\` ($(ls -lh "$OUT_APK" 2>/dev/null | awk '{print $5}'))"
             echo "- Core patch: 9Wz.EEr() forced true (IG native edge-to-edge reels mode)"
             echo "- Interceptors: 1fC.A04 (status bar) + 1fI.A04 (nav bar)"
+            echo "- NEW v0.4: 2Iv.A03 top scrim alpha 0.6 -> 0.2 (TikTok-style legibility gradient)"
+            echo "- NEW v0.4: ClipsViewerNavigationBar bottom comment bar -> fully transparent"
             echo "- Notes: ${{ github.event.inputs.notes }}"
           } >> "$GITHUB_STEP_SUMMARY"

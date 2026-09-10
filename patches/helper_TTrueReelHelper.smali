@@ -58,9 +58,9 @@
     sget v2, Landroid/os/Build$VERSION;->SDK_INT:I
     const/16 v3, 0x1c
     if-lt v2, v3, :cond_skip_save_cutout
-    invoke-virtual {v0}, Landroid/view/Window;->getAttributes()Landroid/view/Window$LayoutParams;
+    invoke-virtual {v0}, Landroid/view/Window;->getAttributes()Landroid/view/WindowManager$LayoutParams;
     move-result-object v2
-    iget v2, v2, Landroid/view/Window$LayoutParams;->layoutInDisplayCutoutMode:I
+    iget v2, v2, Landroid/view/WindowManager$LayoutParams;->layoutInDisplayCutoutMode:I
     sput v2, LX/TTrueReelHelper;->A04:I
     :cond_skip_save_cutout
 
@@ -74,7 +74,7 @@
     invoke-virtual {p0}, Landroidx/fragment/app/Fragment;->getActivity()Landroidx/fragment/app/FragmentActivity;
     move-result-object v0
     if-eqz v0, :cond_no_toast
-    const-string v1, "InstaTrueReel v0.3: true 9:16 Reels ON"
+    const-string v1, "InstaTrueReel v0.4: TikTok-style Reels ON"
     const/4 v2, 0x0
     invoke-static {v0, v1, v2}, Landroid/widget/Toast;->makeText(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;
     move-result-object v0
@@ -82,7 +82,7 @@
     :cond_no_toast
 
     const-string v1, "InstaTrueReel"
-    const-string v2, "v0.3 apply: edge-to-edge engaged (fresh entry)"
+    const-string v2, "v0.4 apply: edge-to-edge engaged (fresh entry)"
     invoke-static {v1, v2}, Landroid/util/Log;->e(Ljava/lang/String;Ljava/lang/String;)I
 
     :cond_active
@@ -102,7 +102,7 @@
     :catch_0
     move-exception v0
     const-string v1, "InstaTrueReel"
-    const-string v2, "v0.3 apply: exception (recovered)"
+    const-string v2, "v0.4 apply: exception (recovered)"
     invoke-static {v1, v2, v0}, Landroid/util/Log;->e(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I
     const/4 v1, 0x0
     sput-object v1, LX/TTrueReelHelper;->A00:Landroid/view/Window;
@@ -154,11 +154,11 @@
     sget v2, Landroid/os/Build$VERSION;->SDK_INT:I
     const/16 v3, 0x1c
     if-lt v2, v3, :cond_skip_cutout
-    invoke-virtual {v0}, Landroid/view/Window;->getAttributes()Landroid/view/Window$LayoutParams;
+    invoke-virtual {v0}, Landroid/view/Window;->getAttributes()Landroid/view/WindowManager$LayoutParams;
     move-result-object v2
     sget v3, LX/TTrueReelHelper;->A04:I
-    iput v3, v2, Landroid/view/Window$LayoutParams;->layoutInDisplayCutoutMode:I
-    invoke-virtual {v0, v2}, Landroid/view/Window;->setAttributes(Landroid/view/Window$LayoutParams;)V
+    iput v3, v2, Landroid/view/WindowManager$LayoutParams;->layoutInDisplayCutoutMode:I
+    invoke-virtual {v0, v2}, Landroid/view/Window;->setAttributes(Landroid/view/WindowManager$LayoutParams;)V
     :cond_skip_cutout
 
     sget v2, Landroid/os/Build$VERSION;->SDK_INT:I
@@ -172,7 +172,7 @@
     invoke-virtual {v1}, Landroid/view/View;->requestApplyInsets()V
 
     const-string v2, "InstaTrueReel"
-    const-string v3, "v0.3 restore: original window chrome restored"
+    const-string v3, "v0.4 restore: original window chrome restored"
     invoke-static {v2, v3}, Landroid/util/Log;->e(Ljava/lang/String;Ljava/lang/String;)I
 
     :cond_reset
@@ -337,11 +337,11 @@
     sget v2, Landroid/os/Build$VERSION;->SDK_INT:I
     const/16 v3, 0x1c
     if-lt v2, v3, :cond_skip_cutout
-    invoke-virtual {p0}, Landroid/view/Window;->getAttributes()Landroid/view/Window$LayoutParams;
+    invoke-virtual {p0}, Landroid/view/Window;->getAttributes()Landroid/view/WindowManager$LayoutParams;
     move-result-object v2
     const/4 v3, 0x1
-    iput v3, v2, Landroid/view/Window$LayoutParams;->layoutInDisplayCutoutMode:I
-    invoke-virtual {p0, v2}, Landroid/view/Window;->setAttributes(Landroid/view/Window$LayoutParams;)V
+    iput v3, v2, Landroid/view/WindowManager$LayoutParams;->layoutInDisplayCutoutMode:I
+    invoke-virtual {p0, v2}, Landroid/view/Window;->setAttributes(Landroid/view/WindowManager$LayoutParams;)V
     :cond_skip_cutout
 
     # disable contrast scrims on API >= 29

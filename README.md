@@ -8,12 +8,20 @@ floating UI. Built entirely with GitHub Actions (decompile → smali patch → r
 
 | Release | APK | What |
 |---|---|---|
+| [v0.4.0-phase3](https://github.com/Skyro7777777/InstaTrueReel/releases/tag/v0.4.0-phase3) | `Instagram-v435.0.0.37.76-InstaTrueReel-signed.apk` | **TikTok-style overlays**: v0.3 + top-bar scrim 0.6 → 0.2 alpha + fully transparent bottom comment bar |
 | [v0.3.0-phase2](https://github.com/Skyro7777777/InstaTrueReel/releases/tag/v0.3.0-phase2) | `Instagram-v435.0.0.37.76-InstaTrueReel-signed.apk` | **Native edge-to-edge**: forces Instagram's own immersive Reels mode on (`9Wz.EEr → true`) + status/nav-bar interceptors |
 | [v0.2.0-phase1.1](https://github.com/Skyro7777777/InstaTrueReel/releases/tag/v0.2.0-phase1.1) | `Instagram-v435.0.0.37.76-InstaTrueReel-signed.apk` | Window-chrome interceptors only (superseded) |
 | [v0.1.0-phase1](https://github.com/Skyro7777777/InstaTrueReel/releases/tag/v0.1.0-phase1) | `Instagram-v435.0.0.37.76-InstaTrueReel-signed.apk` | Initial attempt (superseded) |
 
-> **Always grab the newest release (v0.3.0).** v0.3 flips Instagram's *own* edge-to-edge
-> Reels switch instead of fighting the app's window chrome.
+> **Always grab the newest release (v0.4.0).** v0.3 flipped Instagram's *own* edge-to-edge
+> Reels switch on (video now runs under the status bar); v0.4 additionally makes the overlay
+> bars TikTok-style: a light 20% legibility gradient behind the top bar instead of the
+> near-opaque 60% one, and a fully transparent bottom comment bar.
+>
+> v0.4 also fixes the bug found in the uploaded logcat: the injected window helper crashed
+> on every Reels entry (`Window$LayoutParams` typo), which is why v0.3 never showed its
+> toast and never made the bottom navigation bar transparent. With the helper fixed, the
+> video should now run edge-to-edge behind the nav bar too.
 
 ### Install (IMPORTANT — read fully)
 
@@ -41,11 +49,11 @@ floating UI. Built entirely with GitHub Actions (decompile → smali patch → r
 InstaTrueReel is **raw smali patching, always-on, zero settings**. It activates automatically
 the moment you enter Reels and deactivates when you leave.
 
-**How to confirm you're really running v0.3:** every time you enter Reels, a small popup
+**How to confirm you're really running v0.4:** every time you enter Reels, a small popup
 message (a "toast") appears at the bottom of the screen:
 
 ```
-InstaTrueReel v0.3: true 9:16 Reels ON
+InstaTrueReel v0.4: TikTok-style Reels ON
 ```
 
 - **Toast shows + no black strip** → working.
@@ -53,9 +61,9 @@ InstaTrueReel v0.3: true 9:16 Reels ON
   haven't covered yet).
 - **No toast at all** → you are NOT running this build. The install failed or the old APK is
   still installed. Uninstall Instagram completely (check the app drawer — long-press →
-  uninstall), reboot if in doubt, then install the v0.3 APK again.
+  uninstall), reboot if in doubt, then install the v0.4 APK again.
 
-Optional (advanced): run `adb logcat -s InstaTrueReel` while entering Reels — v0.3 logs
+Optional (advanced): run `adb logcat -s InstaTrueReel` while entering Reels — v0.4 logs
 `apply: edge-to-edge engaged (fresh entry)` and `restore: ...` lines.
 
 ### What v0.3 changes
