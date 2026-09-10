@@ -15,7 +15,7 @@ Base APK: `Instagram-v435.0.0.37.76-patches-v3.8.0.apk` (251 MB, Git LFS, alread
 |---|---|---|
 | jadx decompile (readable Java, deobf) | `DeCompileTheApk.yml` | ✅ done (run 34439742856) |
 | apktool smali decode + grep battery | `AnalyzeSmali.yml` | ✅ done (run 34451536246) |
-| patch + rebuild + sign APK | `BuildPatchedApk.yml` | 🔄 first run dispatched |
+| patch + rebuild + sign APK | `BuildPatchedApk.yml` | ✅ done (run 34455447077 → release **v0.1.0-phase1**) |
 
 ## Verified technical findings (raw smali = ground truth)
 
