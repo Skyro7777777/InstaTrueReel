@@ -121,3 +121,75 @@ requires uninstall first (signature change). **Never install over the official I
 4. Status-bar icon color is forced light (white) in reels — matches TikTok over video.
 5. Base APK is "patches-v3.8.0" (unknown third-party patcher; not InstaEclipse-the-Xposed-module
    — that ships v0.x). Patcher identity TBD; our patches are layered on top regardless.
+
+---
+
+# Phase 2 — v0.3.0 (NATIVE EDGE-TO-EDGE) — the real fix
+
+## Field test of v0.2.0 (user device, Android 10)
+
+User report: still **no change** and — critically — **no toast**. The v0.2 release artifact
+was re-verified (helper class + toast string present in shipped dex), so the patched code
+never executed on the device. Most likely cause: **signature-mismatch install failure** —
+the user still had the base Piko APK (or v0.1.0) installed; Android silently refuses
+"different signature" upgrades, leaving the old app running. v0.3 therefore: (a) shows the
+toast on **every** Reels entry with the version string, (b) logs to logcat
+(`adb logcat -s InstaTrueReel`), (c) README install section rewritten around the
+uninstall-first requirement.
+
+## Deep exploration (this phase) — the actual root cause of the black strip
+
+Four parallel investigations (R-1 web research; E-1/E-2/E-4 smali deep-dives; local layout
+decoding) converged on one mechanism:
+
+- **`X/9Wz.EEr()Z` is Instagram's own edge-to-edge Reels master switch:**
+  `EEr() = !ClipsViewerConfig.A2g && (A3H || QE flag BHQ(0x8109d400023873))`
+  (server-config / Quick-Experiment gated — off for the user's account/device).
+- `EEr()==false` → `X/2Iv` (reels delegate, classes17) feeds **`bds_black` (0x7f060052)**
+  into `0jS.A1K → 1fC.A03 → 1fC.A04` → **opaque status-bar scrim = the black strip.**
+- `EEr()==true` → `bds_transparent` (0x7f0600a9) + `2Iv.A0A()` registers a `6BM` insets
+  listener on `8ug` (WindowInsetsManager) → `Fji(statusH, navH)` → `0jS.A15(statusBarHeight)`
+  **pads the action-bar top containers by status-bar height** (TikTok-style self-padding
+  overlays) and sets `0jS.A0D=true` so every activity resume repaints transparent.
+- **The media container was already full-bleed all along**: decoded
+  `layout_clips_viewer_fragment` (res/3da.xml, mapped from 0x7f0e0a4c via resources.arsc):
+  root ConstraintLayout `match_parent × match_parent`, inner **ViewPager2 (0x7F0B3F45)
+  `match_parent × match_parent`**, zero `fitsSystemWindows`. The window already runs
+  `0x700` flags (MainActivity `A0h`/`A0i`). Only the opaque bar color hides the video.
+- Both entry points funnel through the same switch: the Reels **tab** (`AFt.EEr()`)
+  delegates to its child `9Wz` (interface `X/3Cz`); the **viewer** calls `9Wz.EEr()` directly.
+  EEr's boolean also flows into the viewer item binders (`ACN → ACO.A0w → I45/XXz`).
+- Dead code found: `1fC.A06` has **zero callers** in v435 (full-tree scan) — the v0.2
+  interceptor on it was harmless but useless. Removed in v0.3.
+- Gap found: navigation bar color flows through a twin writer `1fI.A04` (same deferred
+  engine) — v0.2 left the bottom strip black. v0.3 intercepts it.
+- R-1 research: base APK = **crimera/piko v3.8.0 applied via Morphe Manager** (static smali
+  patcher, ReVanced-style — NOT LSPatch; our dex edits are live code). Piko settings =
+  gear icon on feed top bar; "developer options" = **long-press home icon** (Instagram-native
+  QE menu unlocked by Piko). Neither has any edge-to-edge option; no competing solution
+  exists anywhere — InstaTrueReel is first.
+
+## v0.3.0 patch set (SHIPPED)
+
+1. **`9Wz.EEr()Z` → forced `true`** (method body replaced with `const/4 v0,0x1; return v0`)
+   — turns on Instagram's own, fully-engineered edge-to-edge Reels mode.
+2. `1fC.A04` color interceptor kept (transparent while Reels active — defeats all repaint
+   paths incl. Choreographer-deferred writes).
+3. **`1fI.A04` nav-bar interceptor added** (same pattern; bottom strip now transparent too).
+4. `1fC.A06` interceptor dropped (dead code).
+5. Fragment lifecycle hooks kept (scoping for interceptors + restore-on-exit).
+6. Toast on **every fresh Reels entry** ("InstaTrueReel v0.3: true 9:16 Reels ON") +
+   logcat markers (`InstaTrueReel` tag) + per-entry `Log.e` breadcrumbs.
+7. Workflow: added "Verify patches are inside the final APK" step (string checks on the
+   signed APK's dexes) + patch report artifact.
+
+Pre-flight validation (local): full patch → `apktool b` assembly → jadx round-trip confirmed
+`EEr() { return true; }` and `1fC.A04`/`1fI.A04` calling `TTrueReelHelper.A03/A07` first,
+before the parent-climb and both write branches.
+
+## Next (Phase 3 candidates — only if user reports residual issues)
+
+- Comment sheet / bottom overlays inset tuning (if the comment bar overlaps the nav area).
+- Top overlay ("Reels" header) offset polish if status-bar-height padding looks off.
+- Non-9:16 reel letterboxing (fit vs fill) investigation if user reports pillarboxing.
+- Optional Piko-settings-style toggle UI (out of scope unless requested).
